@@ -15,6 +15,9 @@ This is an R Markdown format used for publishing markdown documents to GitHub. W
 
 You can include R code in the document as follows:
 
+private URL: https://researchdata.ntu.edu.sg/privateurl.xhtml?token=fc9e9445-3ba2-465a-abb4-b2cc24de89ed
+
+
 ```{r cars}
 summary(cars)
 ```
