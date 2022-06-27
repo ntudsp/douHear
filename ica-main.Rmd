@@ -1,33 +1,58 @@
 ---
 title: "Untitled"
 output: github_document
+always_allow_html: true
+
+#Bhan, Lam (2022) [Nanyang Technological University]
+#ORCID: 0000-0001-5193-6560
+#GitHub: https://github.com/bhanlam/
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(pander)
+library(dataverse)
+library(tibble)
+library(readxl)
+library(plyr)
+library(dplyr)
+
 ```
 
-## GitHub Documents
+This repository contains the code accompanying the publication "Do uHear? Validation of uHear App for Preliminary Screening of Hearing Ability in Soundscape Studies". This paper is hosted on [arXiv]() and the raw dataset is hosted at [10.21979/N9/0NE37R](https://doi.org/10.21979/N9/0NE37R).
 
-This is an R Markdown format used for publishing markdown documents to GitHub. When you click the **Knit** button all R code chunks are run and a markdown file (.md) suitable for publishing to GitHub is generated.
+## Environment
 
-## Including Code
+The code has been tested on the following platform.
 
-You can include R code in the document as follows:
-
-private URL: https://researchdata.ntu.edu.sg/privateurl.xhtml?token=fc9e9445-3ba2-465a-abb4-b2cc24de89ed
-
-
-```{r cars}
-summary(cars)
+```{r session, message=FALSE, echo=FALSE}
+pander(sessionInfo())
 ```
 
-## Including Plots
+## Data preparation
 
-You can also embed plots, for example:
+Load data from excel
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r dataloader, message=FALSE}
+#load data into dataframe
+dataset <- tibble::as_tibble(read_excel("Hearing test result.xlsx",skip = 0))
+
+
+#prepare data in dataframe for analysis
+cols2fac <- c("Participant ID", "Gender", "Type", "Ear")
+
+cleandata <- dataset %>% 
+        filter(complete.cases(.)) %>% #remove incomplete cases
+        mutate_at(cols2fac,factor) #convert variable to factor
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Exploratory analysis
+
+```{r demographics}
+
+```
+
+
+
