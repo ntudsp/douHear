@@ -52,6 +52,9 @@ cleandata <- dataset %>%
 
 ```{r demographics}
 
+demo <- cleandata %>%
+        distinct(`Participant ID`,.keep_all = TRUE)
+
 ```
 
 
