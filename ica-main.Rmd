@@ -9,15 +9,21 @@ always_allow_html: true
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE,message=FALSE)
 
 library(pander)
 library(dataverse)
 library(tibble)
 library(readxl)
+library(tidyr)
 library(plyr)
 library(dplyr)
-
+library(stringr)
+library(forcats)
+library(skimr)
+library(janitor)
+library(rstatix)
+library(ggplot2)
 ```
 
 This repository contains the code accompanying the publication "Do uHear? Validation of uHear App for Preliminary Screening of Hearing Ability in Soundscape Studies". This paper is hosted on [arXiv]() and the raw dataset is hosted at [10.21979/N9/0NE37R](https://doi.org/10.21979/N9/0NE37R).
@@ -40,22 +46,108 @@ dataset <- tibble::as_tibble(read_excel("Hearing test result.xlsx",skip = 0))
 
 
 #prepare data in dataframe for analysis
-cols2fac <- c("Participant ID", "Gender", "Type", "Ear")
-
+cols2fac <- colnames(dataset)[colnames(dataset)!="Age"]
+facOrder <- c(seq(-10,70,5),"NaN") #order factors
 cleandata <- dataset %>% 
         filter(complete.cases(.)) %>% #remove incomplete cases
-        mutate_at(cols2fac,factor) #convert variable to factor
+        mutate_at(cols2fac,factor) %>% #convert variable to factor 
+        mutate_at(cols2fac[5:15],~fct_relevel(.,facOrder))
+
+#tidy data to wide form
+widedata <- cleandata %>%
+        pivot_wider(names_from=c(Type,Ear),values_from = c("0.125":"8"))
 
 ```
 
 ## Exploratory analysis
 
-```{r demographics}
+### Demographics
 
-demo <- cleandata %>%
+```{r demographics}
+demo <- cleandata %>% #extract demographics only
+        select(c("Participant ID","Gender","Age")) %>%
         distinct(`Participant ID`,.keep_all = TRUE)
+skim(demo)
+get_summary_stats(demo) #summary stats for age
+demo %>% tabyl(Gender) #gender count w perc
+
+#generate latex table
 
 ```
+### Pure tone audiometry summary statistics
+
+Summarize proportions across dB levels for each frequency
+
+```{r ptaSummary}
+
+t<-cleandata %>% 
+        filter(Type=="Audiometer") %>%
+        tabyl(`0.125`,Ear) %>%
+        adorn_totals(where = "row") %>%             # add a total row
+        adorn_percentages(denominator = "col") %>%  # convert to proportions
+        adorn_pct_formatting() %>%                  # convert to percents
+        adorn_ns(position = "front") %>%            # display as: "count (percent)"
+        adorn_title(                                # adjust titles
+        row_name = "125 Hz",
+        col_name = "Ear")
+
+```
+
+
+### Bland-Altman
+
+Bland-Altman plots to visually compare differences between audiometer and mobile app
+
+UHear
+- 0.5 kHz
+- 1 kHz
+- 2 kHz
+- 4 kHz
+- 6 kHz
+
+J. Martin Bland, D. Altman, STATISTICAL METHODS FOR ASSESSING AGREEMENT BETWEEN TWO METHODS OF CLINICAL MEASUREMENT, Lancet. 327 (1986) 307–310. https://doi.org/10.1016/S0140-6736(86)90837-8.
+
+```{r blaalt}
+
+uHfreq<-c("0.5","1","2","4","6")
+comparedf<-widedata %>% select("Participant ID","Gender","Age")
+
+#compute mean and difference for each frequency across left and right
+for (freq in uHfreq){
+        comparedf<-cbind(comparedf,dataset %>% 
+                filter(complete.cases(.)) %>% #remove incomplete cases
+                pivot_wider(names_from=c(Type,Ear),
+                            values_from = c("0.125":"8")) %>% #expanding Type and Ear
+                select(matches(paste0("^",freq,"_"))) %>% #0.5 kHz
+                #add freq as colname to reflect in variable
+                mutate(meanL=rowMeans(select(., contains("Left")),na.rm=T), 
+                       meanR=rowMeans(select(., contains("Right")),na.rm=T),
+                       diffL=(select(., contains("Left") & contains("Audiometer"))-
+                               select(., contains("Left") & contains("uHear")))[,],
+                       diffR=(select(., contains("Right") & contains("Audiometer"))-
+                               select(., contains("Right") & contains("uHear")))[,]) %>%
+                dplyr::rename(!!paste0("meanL",freq):=`meanL`) %>%
+                dplyr::rename(!!paste0("meanR",freq):=`meanR`) %>%
+                dplyr::rename(!!paste0("diffL",freq):=`diffL`) %>%
+                dplyr::rename(!!paste0("diffR",freq):=`diffR`)) 
+}
+
+ggplot(comparedf, aes(x = meanL0.5, y = diffL0.5)) +
+  geom_point(size=2) +
+  geom_hline(yintercept = mean(comparedf$diffL0.5)) +
+  geom_hline(yintercept = mean(comparedf$diffL0.5) 
+             - 1.96*sd(comparedf$diffL0.5) , color = "red", linetype="dashed") +
+  geom_hline(yintercept = mean(comparedf$diffL0.5) 
+             + 1.96*sd(comparedf$diffL0.5), color = "red", linetype="dashed") +
+  ggtitle("Bland-Altman Plot") +
+  ylab("Difference Between Instruments") +
+  xlab("Average")+theme_bw()
+
+```
+
+## Statistical analysis
+
+
 
 
 
