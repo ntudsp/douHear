@@ -23,6 +23,7 @@ library(forcats)
 library(skimr)
 library(janitor)
 library(rstatix)
+library(ggpubr)
 library(ggplot2)
 library(RColorBrewer)
 library(gridExtra)
@@ -96,6 +97,19 @@ t<-cleandata %>%
 
 ```
 
+### Test for normality
+
+QQ plot, shapiro-wilks
+
+```{r normality}
+ggqqplot(tidydata %>% filter(freq=="6" && Ear=="Left") %>% .$diff)
+gghistogram(tidydata %>% filter(freq=="6" && Ear=="Left") %>% .$diff,
+            binwidth = 5,
+            add.normal = TRUE)
+shapiro.test(tidydata %>% filter(freq=="0.5" && Ear=="Left") %>% .$diff)
+
+```
+
 
 ### Bland-Altman
 
@@ -124,65 +138,105 @@ tidydata<-dataset %>%
         pivot_wider(names_from = Type, values_from = "dB") %>% #expand Type
         mutate(diff=Audiometer-uHear,
                ave=rowMeans(select(.,c("Audiometer","uHear")),na.rm=TRUE)) %>%
+        mutate(freqAll="All",avediffAll=median(diff),
+               lowerAll=quantile(diff,0.025),upperAll=quantile(diff,0.975)) %>%
         group_by(Ear,freq) %>% #find average diff, lower & upper for each ear and freq
-        mutate(avediff = mean(diff),
-               lower=mean(diff)- 1.96*sd(diff),
-               upper=mean(diff)+ 1.96*sd(diff))
+        mutate(avediff = median(diff),
+               lower=quantile(diff,0.025),
+               upper=quantile(diff,0.975)) 
+        #mutate(avediff = mean(diff),
+        #       lower=mean(diff)- 1.96*sd(diff),
+        #       upper=mean(diff)+ 1.96*sd(diff))
 
 geom.text.size=5.5
 theme.size=30
 geom.point.size=4
+xlim.upp = 60
+xlim.low = -5
+ylim.upp = 40
+ylim.low = -40
 set1clr<-brewer.pal(n = 9,"Set1")
 dataupto2kHz<-tidydata %>% filter(!(freq=="4"|freq=="6"))
 dataupfrom4kHz<-tidydata %>% filter(!(freq=="0.5"|freq=="1"|freq=="2"))
 
-plot1<-ggplot(dataupto2kHz, aes(x = ave, y = diff,color=Ear)) + facet_grid(Ear~freq) +
-  geom_point(size=geom.point.size,alpha=0.5) +
-  geom_hline(aes(yintercept = avediff),dataupto2kHz, color=set1clr[3]) +
-  geom_text(aes(33,avediff,
-                label = paste("mean diff =",as.character(round(avediff,2))), 
-                vjust = -0.5), color=set1clr[3],size=geom.text.size, 
-            check_overlap = T) +
-  geom_hline(aes(yintercept = lower),dataupto2kHz, color = set1clr[3], linetype="dashed") +
-  geom_text(aes(35,lower,
-                label = paste("+1.96 SD =",as.character(round(lower,2))), 
-                vjust = 1.5), color=set1clr[3],size=geom.text.size,
-            check_overlap = T) +      
-  geom_hline(aes(yintercept = upper),dataupto2kHz, color = set1clr[3], linetype="dashed") +
-  geom_text(aes(35,upper,
-                label = paste("-1.96 SD =",as.character(round(upper,2))), 
-                vjust = -0.5), color=set1clr[3],size=geom.text.size,
-            check_overlap = T) +
-  ylab(" ") + xlab(" ") +
-  scale_color_brewer(palette = "Set1") +
-  theme(text = element_text(size=theme.size))
-plot2<-ggplot(dataupfrom4kHz, aes(x = ave, y = diff,color=Ear)) + facet_grid(Ear~freq) +
-  geom_point(size=geom.point.size,alpha=0.5) +
-  geom_hline(aes(yintercept = avediff),dataupfrom4kHz, color=set1clr[3]) +
-  geom_text(aes(45,avediff,
-                label = paste("mean diff =",as.character(round(avediff,2))), 
-                vjust = -0.5), color=set1clr[3],size=geom.text.size,
-                alpha=0.8, check_overlap = T) +
-  geom_hline(aes(yintercept = lower),dataupfrom4kHz, color = set1clr[3], linetype="dashed") +
-  geom_text(aes(45,lower,
-                label = paste("+1.96 SD =",as.character(round(lower,2))), 
-                vjust = 1.5), color=set1clr[3],size=geom.text.size,
-                alpha=0.8, check_overlap = T) +      
-  geom_hline(aes(yintercept = upper),dataupfrom4kHz, color = set1clr[3], linetype="dashed") +
-  geom_text(aes(45,upper,
-                label = paste("-1.96 SD =",as.character(round(upper,2))), 
-                vjust = -0.5), color=set1clr[3],size=geom.text.size,
-                alpha=0.8, check_overlap = T) +
-  ylab(" ") + xlab(" ") + 
-  scale_color_brewer(palette = "Set1") +
-  theme(text = element_text(size=theme.size))
+baplotOpts<-function(data,X,Y,color, #ggplot aes
+                     fg.XY, #facet grid formula
+                     hl.avediff, hl.upper, hl.lower, #hline for avediff, upper, lower
+                     gt.avediff.x, gt.upper.x, gt.lower.x, #x coord for geomtext
+                     geom.text.size,theme.size,geom.point.size,colorp,
+                     xlim.low,xlim.upp,ylim.low,ylim.upp){
+ggplot(data, aes(x = {{X}}, y = {{Y}}, color={{color}})) + 
+        facet_grid(fg.XY) +
+        geom_point(size=geom.point.size,alpha=0.5) +
+        #average difference line
+        geom_hline(aes(yintercept = {{hl.avediff}}), data, color=colorp[3]) +
+        geom_text(aes(gt.avediff.x,{{hl.avediff}},
+                      label = paste("M =",as.character(round({{hl.avediff}},2))), 
+                        vjust = -0.5,hjust="right"), 
+                color=set1clr[3],size=geom.text.size, 
+                check_overlap = T) +
+        geom_hline(aes(yintercept = {{hl.lower}}),data, 
+                   color = colorp[3], linetype="dashed") +
+        geom_text(aes(gt.lower.x,{{hl.lower}},
+                        label = paste("2.5^{th}:",as.character(round({{hl.lower}},2))), 
+                        vjust = 1.5,hjust="right"), 
+                  color=colorp[3],size=geom.text.size,
+                  check_overlap = T, parse = TRUE) +      
+          geom_hline(aes(yintercept = {{hl.upper}}),data, 
+                     color = colorp[3], linetype="dashed") +
+          geom_text(aes(gt.upper.x,{{hl.upper}},
+                        label = paste("97.5^{th}:",as.character(round({{hl.upper}},2))), 
+                        vjust = -0.5,hjust="right"), size=geom.text.size,
+                  color=colorp[3],check_overlap = T, parse = TRUE) +
+        ylab(element_blank()) + xlab(element_blank()) + 
+        xlim(xlim.low, xlim.upp) + ylim(ylim.low, ylim.upp) +
+        scale_color_brewer(palette = "Set1") +
+        theme(text = element_text(size=theme.size),legend.position="none",
+              axis.title = element_blank())
+}
+
+plot1<-baplotOpts(data=dataupto2kHz, X=ave, Y=diff, color=Ear,
+                  fg.XY = as.formula(Ear~freq),
+                  hl.avediff = avediff, hl.upper = upper, hl.lower=lower,
+                  gt.avediff.x=xlim.upp, gt.upper.x = xlim.upp, 
+                  gt.lower.x = xlim.upp,
+                  geom.text.size=5.5,theme.size=30,geom.point.size=4,
+                  colorp = set1clr, xlim.low = xlim.low, xlim.upp = xlim.upp,
+                  ylim.low = ylim.low, ylim.upp = ylim.upp)
+
+plot2<-baplotOpts(data=dataupfrom4kHz, X=ave, Y=diff, color=Ear,
+                  fg.XY = as.formula(Ear~freq),
+                  hl.avediff = avediff, hl.upper = upper, hl.lower=lower,
+                  gt.avediff.x=xlim.upp, gt.upper.x = xlim.upp, 
+                  gt.lower.x = xlim.upp,
+                  geom.text.size=5.5,theme.size=30,geom.point.size=4,
+                  colorp = set1clr, xlim.low = xlim.low, xlim.upp = xlim.upp,
+                  ylim.low = ylim.low, ylim.upp = ylim.upp) +
+        theme(strip.text.y = element_blank())
+
+plot3<-baplotOpts(data=tidydata, X=ave, Y=diff, color=Ear,
+                  fg.XY = as.formula(Ear~freqAll),
+                  hl.avediff = avediffAll, hl.upper = upperAll, hl.lower=lowerAll,
+                  gt.avediff.x=xlim.upp, gt.upper.x = xlim.upp, 
+                  gt.lower.x = xlim.upp,
+                  geom.text.size=5.5,theme.size=30,geom.point.size=4,
+                  colorp = set1clr, xlim.low = xlim.low, xlim.upp = xlim.upp,
+                  ylim.low = ylim.low, ylim.upp = ylim.upp) + 
+        theme(axis.text.y=element_blank(),axis.ticks.y=element_blank(),
+              axis.ticks.length.y = unit(0, "pt"), 
+              plot.margin = unit(c(0.2,0.2,0.2,0),"cm"))
+
 grid.arrange(plot1,plot2,nrow=2,
              left=textGrob("Difference between PTA and uHear (dB HL)", rot = 90, gp = gpar(fontsize = theme.size)),
              bottom=textGrob("Arithmetic average between PTA and uHear (dB HL)", gp = gpar(fontsize = theme.size)))
 
-g <- arrangeGrob(plot1, plot2, nrow=2,
+#generate g for ggsave
+g <- arrangeGrob(plot1, plot2, plot3,
+                 widths = c(1, 1, 1), #equal widths in thirds
+                 layout_matrix = rbind(c(1,1,1),
+                                        c(2,2,3)),
              left=textGrob("Difference between PTA and uHear (dB HL)", rot = 90, gp = gpar(fontsize = theme.size)),
-             bottom=textGrob("Arithmetic average between PTA and uHear (dB HL)", gp = gpar(fontsize = theme.size))) #generates g
+             bottom=textGrob("Arithmetic average between PTA and uHear (dB HL)", gp = gpar(fontsize = theme.size))) 
 ggsave("BAPlot.svg",plot = g, width = 1500, height = 800, units = "px",scale = 5)
 ggsave("BAPlot.pdf",plot = g, width = 1500, height = 1200, units = "px",scale = 3.5)
 
