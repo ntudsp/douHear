@@ -61,7 +61,53 @@ cleandata <- dataset %>%
 widedata <- cleandata %>%
         pivot_wider(names_from=c(Type,Ear),values_from = c("0.125":"8"))
 
+uHfreq<-c("0.5","1","2","4","6")
+defvar<-c("Participant ID","Gender","Age","Type","Ear")
+
+#compute mean and difference for each frequency across left and right
+tidydata<-dataset %>%
+        filter(complete.cases(.)) %>% #remove incomplete cases
+        select(c(defvar,uHfreq)) %>% #filter non interested freq
+        mutate_at(uHfreq,as.numeric) %>% #convert to numeric
+        pivot_longer(!defvar, names_to="freq", values_to= "dB") %>% #long format
+        pivot_wider(names_from = Type, values_from = "dB") %>% #expand Type
+        mutate(diff=Audiometer-uHear,
+               ave=rowMeans(select(.,c("Audiometer","uHear")),na.rm=TRUE)) %>%
+        #median and quartile for all frequencies
+        mutate(freqAll="All",avediffAll=median(diff),
+               lowerAll=quantile(diff,0.025),upperAll=quantile(diff,0.975)) %>%
+        group_by(Ear,freq) %>% #find average diff, lower & upper for each ear and freq
+        mutate(avediff = median(diff),
+               lower=quantile(diff,0.025),
+               upper=quantile(diff,0.975)) %>%
+        ungroup()
+        #mutate(avediff = mean(diff),
+        #       lower=mean(diff)- 1.96*sd(diff),
+        #       upper=mean(diff)+ 1.96*sd(diff))
 ```
+
+### WHO hearing loss grading
+
+```{r whohl}
+
+#compute diagnosis based on WHO average of 0.5, 1, 2, 4 in the better ear
+#if worst ear average is >35 dB also classifies as non-normal hearing
+
+tidydata<-tidydata %>%
+        group_by(`Participant ID`,Ear) %>%
+        #arithmetic average dB HL across freq per ear
+        mutate(thres.ave.uH=mean(uHear),
+               thres.ave.aud=mean(Audiometer)) %>%
+        ungroup() %>%
+        group_by(`Participant ID`) %>%
+        #normal -> better ear <20 dB HL ave && worst ear <35 dB HL
+        mutate(adiag.uH=ifelse(max(thres.ave.uH)<35,
+                               ifelse(min(thres.ave.uH)<20,1,0),0),
+               adiag.aud=ifelse(max(thres.ave.aud)<35,
+                               ifelse(min(thres.ave.aud)<20,1,0),0))
+
+```
+
 
 ## Exploratory analysis
 
@@ -97,19 +143,6 @@ t<-cleandata %>%
 
 ```
 
-### Test for normality
-
-QQ plot, shapiro-wilks
-
-```{r normality}
-ggqqplot(tidydata %>% filter(freq=="6" && Ear=="Left") %>% .$diff)
-gghistogram(tidydata %>% filter(freq=="6" && Ear=="Left") %>% .$diff,
-            binwidth = 5,
-            add.normal = TRUE)
-shapiro.test(tidydata %>% filter(freq=="0.5" && Ear=="Left") %>% .$diff)
-
-```
-
 
 ### Bland-Altman
 
@@ -124,30 +157,9 @@ UHear
 
 J. Martin Bland, D. Altman, STATISTICAL METHODS FOR ASSESSING AGREEMENT BETWEEN TWO METHODS OF CLINICAL MEASUREMENT, Lancet. 327 (1986) 307–310. https://doi.org/10.1016/S0140-6736(86)90837-8.
 
+J.M. Bland, D.G. Altman, Measuring agreement in method comparison studies, Stat. Methods Med. Res. 8 (1999) 135–160. https://doi.org/10.1177/096228029900800204.
+
 ```{r blaalt}
-
-uHfreq<-c("0.5","1","2","4","6")
-defvar<-c("Participant ID","Gender","Age","Type","Ear")
-
-#compute mean and difference for each frequency across left and right
-tidydata<-dataset %>%
-        filter(complete.cases(.)) %>% #remove incomplete cases
-        select(c(defvar,uHfreq)) %>% #filter non interested freq
-        mutate_at(uHfreq,as.numeric) %>% #convert to numeric
-        pivot_longer(!defvar, names_to="freq", values_to= "dB") %>% #long format
-        pivot_wider(names_from = Type, values_from = "dB") %>% #expand Type
-        mutate(diff=Audiometer-uHear,
-               ave=rowMeans(select(.,c("Audiometer","uHear")),na.rm=TRUE)) %>%
-        mutate(freqAll="All",avediffAll=median(diff),
-               lowerAll=quantile(diff,0.025),upperAll=quantile(diff,0.975)) %>%
-        group_by(Ear,freq) %>% #find average diff, lower & upper for each ear and freq
-        mutate(avediff = median(diff),
-               lower=quantile(diff,0.025),
-               upper=quantile(diff,0.975)) 
-        #mutate(avediff = mean(diff),
-        #       lower=mean(diff)- 1.96*sd(diff),
-        #       upper=mean(diff)+ 1.96*sd(diff))
-
 geom.text.size=5.5
 theme.size=30
 geom.point.size=4
@@ -227,16 +239,20 @@ plot3<-baplotOpts(data=tidydata, X=ave, Y=diff, color=Ear,
               plot.margin = unit(c(0.2,0.2,0.2,0),"cm"))
 
 grid.arrange(plot1,plot2,nrow=2,
-             left=textGrob("Difference between PTA and uHear (dB HL)", rot = 90, gp = gpar(fontsize = theme.size)),
-             bottom=textGrob("Arithmetic average between PTA and uHear (dB HL)", gp = gpar(fontsize = theme.size)))
+             left=textGrob("Difference between PTA and uHear (dB HL)", rot = 90, 
+                           gp = gpar(fontsize = theme.size)),
+             bottom=textGrob("Arithmetic average between PTA and uHear (dB HL)", 
+                             gp = gpar(fontsize = theme.size)))
 
 #generate g for ggsave
 g <- arrangeGrob(plot1, plot2, plot3,
                  widths = c(1, 1, 1), #equal widths in thirds
-                 layout_matrix = rbind(c(1,1,1),
-                                        c(2,2,3)),
-             left=textGrob("Difference between PTA and uHear (dB HL)", rot = 90, gp = gpar(fontsize = theme.size)),
-             bottom=textGrob("Arithmetic average between PTA and uHear (dB HL)", gp = gpar(fontsize = theme.size))) 
+                 #arrange plots to extend to allocated space
+                 layout_matrix = rbind(c(1,1,1),c(2,2,3)), 
+             left=textGrob("Difference between PTA and uHear (dB HL)", 
+                           rot = 90, gp = gpar(fontsize = theme.size)),
+             bottom=textGrob("Arithmetic average between PTA and uHear (dB HL)", 
+                             gp = gpar(fontsize = theme.size))) 
 ggsave("BAPlot.svg",plot = g, width = 1500, height = 800, units = "px",scale = 5)
 ggsave("BAPlot.pdf",plot = g, width = 1500, height = 1200, units = "px",scale = 3.5)
 
@@ -244,6 +260,13 @@ ggsave("BAPlot.pdf",plot = g, width = 1500, height = 1200, units = "px",scale = 
 
 ## Statistical analysis
 
+```{r kwt}
+
+kwTest<-function(df,freq,ear){
+        
+}
+
+```
 
 
 
