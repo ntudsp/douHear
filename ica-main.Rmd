@@ -23,6 +23,8 @@ library(forcats)
 library(skimr)
 library(janitor)
 library(rstatix)
+library(caret)
+library(cvms)
 library(ggpubr)
 library(ggplot2)
 library(RColorBrewer)
@@ -93,6 +95,21 @@ tidydata<-dataset %>%
 #compute diagnosis based on WHO average of 0.5, 1, 2, 4 in the better ear
 #if worst ear average is >35 dB also classifies as non-normal hearing
 
+tidydata.who<-tidydata %>%
+        filter(!freq=="6") %>%
+        group_by(`Participant ID`,Ear) %>%
+        #arithmetic average dB HL across freq per ear
+        mutate(thres.ave.uH=mean(uHear),
+               thres.ave.aud=mean(Audiometer)) %>%
+        ungroup() %>%
+        group_by(`Participant ID`) %>%
+        #normal -> better ear <20 dB HL ave && worst ear <35 dB HL
+        mutate(adiag.uH=ifelse(max(thres.ave.uH)<35,
+                               ifelse(min(thres.ave.uH)<20,1,0),0),
+               adiag.aud=ifelse(max(thres.ave.aud)<35,
+                               ifelse(min(thres.ave.aud)<20,1,0),0))%>%
+        ungroup()
+
 tidydata<-tidydata %>%
         group_by(`Participant ID`,Ear) %>%
         #arithmetic average dB HL across freq per ear
@@ -104,7 +121,62 @@ tidydata<-tidydata %>%
         mutate(adiag.uH=ifelse(max(thres.ave.uH)<35,
                                ifelse(min(thres.ave.uH)<20,1,0),0),
                adiag.aud=ifelse(max(thres.ave.aud)<35,
-                               ifelse(min(thres.ave.aud)<20,1,0),0))
+                               ifelse(min(thres.ave.aud)<20,1,0),0)) %>%
+        ungroup()
+
+#confusion matrix
+unique.diag.who <- tidydata.who %>% #WHO method
+        filter(freq=="0.5" & Ear=="Left") %>% 
+        select(c("adiag.uH","adiag.aud"))
+unique.diag<-tidydata %>% #all frequcies in uHear
+        filter(freq=="0.5" & Ear=="Left") %>% 
+        select(c("adiag.uH","adiag.aud"))
+cfm.whohl <- confusionMatrix(data=as.factor(unique.diag.who$adiag.uH),
+                            reference = as.factor(unique.diag.who$adiag.aud),
+                            positive = "1")
+cfm.allfreq <- confusionMatrix(data=as.factor(unique.diag$adiag.uH),
+                            reference = as.factor(unique.diag$adiag.aud),
+                            positive = "1")
+
+cfm.whohl.tb <- as_tibble(table(unique.diag.who))
+cfm.allfreq.tb <- as_tibble(table(unique.diag))
+
+theme.size <- 16
+
+cfm.plot.who<-plot_confusion_matrix(cfm.whohl.tb, 
+                      target_col = "adiag.aud", 
+                      prediction_col = "adiag.uH",
+                      counts_col = "n",
+                      add_normalized = FALSE,palette = "Blues",
+                      font_counts = font(size = 10)) +
+        ggplot2::labs(x=element_blank(),y=element_blank()) +
+        ggplot2::theme(axis.title = element_blank(),
+                       plot.margin = unit(c(0,0,0,0),"cm"),
+                       axis.text = element_text(size = theme.size))
+cfm.plot.all<-plot_confusion_matrix(cfm.allfreq.tb, 
+                      target_col = "adiag.aud", 
+                      prediction_col = "adiag.uH",
+                      counts_col = "n",
+                      add_normalized = FALSE,palette = "Blues",
+                      font_counts = font(size = 10)) +
+        ggplot2::labs(x=element_blank(),y=element_blank()) +
+        ggplot2::theme(axis.title = element_blank(),
+                       plot.margin = unit(c(0,0,0,0),"cm"),
+                       axis.text = element_text(size = theme.size))
+
+grid.arrange(cfm.plot.who,cfm.plot.all,nrow=1,
+             left=textGrob("uHear", rot = 90, 
+                           gp = gpar(fontsize = theme.size*1.2)),
+             top=textGrob("Audiometer", 
+                             gp = gpar(fontsize = theme.size*1.2)))
+
+g <- arrangeGrob(cfm.plot.who, cfm.plot.all, nrow = 1,
+                 left=textGrob("uHear", rot = 90, 
+                               gp = gpar(fontsize = theme.size*1.2)),
+                 top=textGrob("Audiometer", 
+                               gp = gpar(fontsize = theme.size*1.2))) 
+ggsave("cfm.svg",plot = g, width = 1500, height = 800, units = "px",scale = 5)
+ggsave("cfm.pdf",plot = g, device = "pdf", width = 20, height = 10, units = "cm")
 
 ```
 
