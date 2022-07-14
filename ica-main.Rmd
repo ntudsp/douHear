@@ -25,11 +25,13 @@ library(janitor)
 library(rstatix)
 library(caret)
 library(cvms)
+library(asht)
 library(ggpubr)
 library(ggplot2)
 library(RColorBrewer)
 library(gridExtra)
 library(grid)
+library(kableExtra)
 ```
 
 This repository contains the code accompanying the publication "Do uHear? Validation of uHear App for Preliminary Screening of Hearing Ability in Soundscape Studies". This paper is hosted on [arXiv]() and the raw dataset is hosted at [10.21979/N9/0NE37R](https://doi.org/10.21979/N9/0NE37R).
@@ -76,16 +78,28 @@ tidydata<-dataset %>%
         mutate(diff=Audiometer-uHear,
                ave=rowMeans(select(.,c("Audiometer","uHear")),na.rm=TRUE)) %>%
         #median and quartile for all frequencies
-        mutate(freqAll="All",avediffAll=median(diff),
-               lowerAll=quantile(diff,0.025),upperAll=quantile(diff,0.975)) %>%
+        mutate(freqAll="All",avediffAll=median(diff), 
+               med.lwr.all = quantileTest(x=diff,prob = 0.5,conf.level = 0.95)$conf.int[1],
+               med.upr.all = quantileTest(x=diff,prob = 0.5,conf.level = 0.95)$conf.int[2],
+               lowerAll=quantile(diff,0.025),upperAll=quantile(diff,0.975),
+               lowerAll.lwr = quantileTest(x=diff,prob = 0.025,conf.level = 0.95)$conf.int[1],
+               lowerAll.upr = quantileTest(x=diff,prob = 0.025,conf.level = 0.95)$conf.int[2],
+               upperAll.lwr = quantileTest(x=diff,prob = 0.975,conf.level = 0.95)$conf.int[1],
+               upperAll.upr = quantileTest(x=diff,prob = 0.975,conf.level = 0.95)$conf.int[2]) %>%
         group_by(Ear,freq) %>% #find average diff, lower & upper for each ear and freq
         mutate(avediff = median(diff),
-               lower=quantile(diff,0.025),
-               upper=quantile(diff,0.975)) %>%
+               med.lwr = quantileTest(x=diff,prob = 0.5,conf.level = 0.95)$conf.int[1],
+               med.upr = quantileTest(x=diff,prob = 0.5,conf.level = 0.95)$conf.int[2],
+               lower=quantile(diff,0.025), upper=quantile(diff,0.975),
+               lower.lwr = quantileTest(x=diff,prob = 0.025,conf.level = 0.95)$conf.int[1],
+               lower.upr = quantileTest(x=diff,prob = 0.025,conf.level = 0.95)$conf.int[2],
+               upper.lwr = quantileTest(x=diff,prob = 0.975,conf.level = 0.95)$conf.int[1],
+               upper.upr = quantileTest(x=diff,prob = 0.975,conf.level = 0.95)$conf.int[2]) %>%
         ungroup()
         #mutate(avediff = mean(diff),
         #       lower=mean(diff)- 1.96*sd(diff),
         #       upper=mean(diff)+ 1.96*sd(diff))
+
 ```
 
 ### WHO hearing loss grading
@@ -128,9 +142,11 @@ tidydata<-tidydata %>%
 unique.diag.who <- tidydata.who %>% #WHO method
         filter(freq=="0.5" & Ear=="Left") %>% 
         select(c("adiag.uH","adiag.aud"))
-unique.diag<-tidydata %>% #all frequcies in uHear
+unique.diag<-tidydata %>% #all freq in uHear vs aud
         filter(freq=="0.5" & Ear=="Left") %>% 
         select(c("adiag.uH","adiag.aud"))
+
+#compute metrics
 cfm.whohl <- confusionMatrix(data=as.factor(unique.diag.who$adiag.uH),
                             reference = as.factor(unique.diag.who$adiag.aud),
                             positive = "1")
@@ -148,7 +164,7 @@ cfm.plot.who<-plot_confusion_matrix(cfm.whohl.tb,
                       prediction_col = "adiag.uH",
                       counts_col = "n",
                       add_normalized = FALSE,palette = "Blues",
-                      font_counts = font(size = 10)) +
+                      font_counts = cvms::font(size=10)) +
         ggplot2::labs(x=element_blank(),y=element_blank()) +
         ggplot2::theme(axis.title = element_blank(),
                        plot.margin = unit(c(0,0,0,0),"cm"),
@@ -158,7 +174,7 @@ cfm.plot.all<-plot_confusion_matrix(cfm.allfreq.tb,
                       prediction_col = "adiag.uH",
                       counts_col = "n",
                       add_normalized = FALSE,palette = "Blues",
-                      font_counts = font(size = 10)) +
+                      font_counts = cvms::font(size=10)) +
         ggplot2::labs(x=element_blank(),y=element_blank()) +
         ggplot2::theme(axis.title = element_blank(),
                        plot.margin = unit(c(0,0,0,0),"cm"),
@@ -245,30 +261,47 @@ dataupfrom4kHz<-tidydata %>% filter(!(freq=="0.5"|freq=="1"|freq=="2"))
 
 baplotOpts<-function(data,X,Y,color, #ggplot aes
                      fg.XY, #facet grid formula
+                     nf,#no. of frequencies
                      hl.avediff, hl.upper, hl.lower, #hline for avediff, upper, lower
                      gt.avediff.x, gt.upper.x, gt.lower.x, #x coord for geomtext
+                     lwr.ymin,lwr.ymax,upr.ymin,upr.ymax,
+                     med.ymin,med.ymax,
                      geom.text.size,theme.size,geom.point.size,colorp,
                      xlim.low,xlim.upp,ylim.low,ylim.upp){
 ggplot(data, aes(x = {{X}}, y = {{Y}}, color={{color}})) + 
         facet_grid(fg.XY) +
+        #95% cf. int. median
+        geom_rect(data = data[1:(nf*2),],aes(xmin = -Inf, xmax = Inf, 
+                          ymin = {{med.ymin}}, ymax = {{med.ymax}}),
+                fill = set1clr[4], alpha = 0.2,color = NA) +
+        #95% cf. 2.5th percentile
+        geom_rect(data = data[1:(nf*2),],aes(xmin = -Inf, xmax = Inf, 
+                                  ymin = {{lwr.ymin}}, ymax = {{lwr.ymax}}),
+                        fill = set1clr[3], alpha = 0.2,color = NA) +
+        #95% cf. 97.5th percentile
+        geom_rect(data = data[1:(nf*2),],aes(xmin = -Inf, xmax = Inf,
+                          ymin = {{upr.ymin}}, ymax = {{upr.ymax}}),
+                fill = set1clr[3], alpha = 0.2,color = NA) +
         geom_point(size=geom.point.size,alpha=0.5) +
-        #average difference line
-        geom_hline(aes(yintercept = {{hl.avediff}}), data, color=colorp[3]) +
+        #average difference line (median)
+        geom_hline(aes(yintercept = {{hl.avediff}}), data, color=colorp[4]) +
         geom_text(aes(gt.avediff.x,{{hl.avediff}},
                       label = paste("M =",as.character(round({{hl.avediff}},2))), 
                         vjust = -0.5,hjust="right"), 
-                color=set1clr[3],size=geom.text.size, 
+                color=set1clr[4],size=geom.text.size, 
                 check_overlap = T) +
+       #lower bound line at 2.5th percentile
         geom_hline(aes(yintercept = {{hl.lower}}),data, 
                    color = colorp[3], linetype="dashed") +
         geom_text(aes(gt.lower.x,{{hl.lower}},
                         label = paste("2.5^{th}:",as.character(round({{hl.lower}},2))), 
                         vjust = 1.5,hjust="right"), 
                   color=colorp[3],size=geom.text.size,
-                  check_overlap = T, parse = TRUE) +      
-          geom_hline(aes(yintercept = {{hl.upper}}),data, 
+                  check_overlap = T, parse = TRUE) +  
+        #upper bound line at 97.5th percentile        
+         geom_hline(aes(yintercept = {{hl.upper}}),data, 
                      color = colorp[3], linetype="dashed") +
-          geom_text(aes(gt.upper.x,{{hl.upper}},
+         geom_text(aes(gt.upper.x,{{hl.upper}},
                         label = paste("97.5^{th}:",as.character(round({{hl.upper}},2))), 
                         vjust = -0.5,hjust="right"), size=geom.text.size,
                   color=colorp[3],check_overlap = T, parse = TRUE) +
@@ -280,29 +313,38 @@ ggplot(data, aes(x = {{X}}, y = {{Y}}, color={{color}})) +
 }
 
 plot1<-baplotOpts(data=dataupto2kHz, X=ave, Y=diff, color=Ear,
-                  fg.XY = as.formula(Ear~freq),
+                  fg.XY = as.formula(Ear~freq),nf=3,
                   hl.avediff = avediff, hl.upper = upper, hl.lower=lower,
                   gt.avediff.x=xlim.upp, gt.upper.x = xlim.upp, 
                   gt.lower.x = xlim.upp,
+                  lwr.ymin = lower.lwr, lwr.ymax=lower.upr,
+                  upr.ymin = upper.lwr, upr.ymax=upper.upr,
+                  med.ymin = med.lwr, med.ymax=med.upr,
                   geom.text.size=5.5,theme.size=30,geom.point.size=4,
                   colorp = set1clr, xlim.low = xlim.low, xlim.upp = xlim.upp,
                   ylim.low = ylim.low, ylim.upp = ylim.upp)
 
 plot2<-baplotOpts(data=dataupfrom4kHz, X=ave, Y=diff, color=Ear,
-                  fg.XY = as.formula(Ear~freq),
+                  fg.XY = as.formula(Ear~freq),nf=2,
                   hl.avediff = avediff, hl.upper = upper, hl.lower=lower,
                   gt.avediff.x=xlim.upp, gt.upper.x = xlim.upp, 
                   gt.lower.x = xlim.upp,
+                  lwr.ymin = lower.lwr, lwr.ymax=lower.upr,
+                  upr.ymin = upper.lwr, upr.ymax=upper.upr,
+                  med.ymin = med.lwr, med.ymax=med.upr,
                   geom.text.size=5.5,theme.size=30,geom.point.size=4,
                   colorp = set1clr, xlim.low = xlim.low, xlim.upp = xlim.upp,
                   ylim.low = ylim.low, ylim.upp = ylim.upp) +
         theme(strip.text.y = element_blank())
 
 plot3<-baplotOpts(data=tidydata, X=ave, Y=diff, color=Ear,
-                  fg.XY = as.formula(Ear~freqAll),
+                  fg.XY = as.formula(Ear~freqAll),nf=1,
                   hl.avediff = avediffAll, hl.upper = upperAll, hl.lower=lowerAll,
                   gt.avediff.x=xlim.upp, gt.upper.x = xlim.upp, 
                   gt.lower.x = xlim.upp,
+                  lwr.ymin = lowerAll.lwr, lwr.ymax=lowerAll.upr,
+                  upr.ymin = upperAll.lwr, upr.ymax=upperAll.upr,
+                  med.ymin = med.lwr.all, med.ymax=med.upr.all,
                   geom.text.size=5.5,theme.size=30,geom.point.size=4,
                   colorp = set1clr, xlim.low = xlim.low, xlim.upp = xlim.upp,
                   ylim.low = ylim.low, ylim.upp = ylim.upp) + 
@@ -328,15 +370,67 @@ g <- arrangeGrob(plot1, plot2, plot3,
 ggsave("BAPlot.svg",plot = g, width = 1500, height = 800, units = "px",scale = 5)
 ggsave("BAPlot.pdf",plot = g, width = 1500, height = 1200, units = "px",scale = 3.5)
 
+plot1
 ```
 
 ## Statistical analysis
 
-```{r kwt}
+```{r mwwt}
 
-kwTest<-function(df,freq,ear){
-        
+wrsTest<-function(df,freq,ear){
+        data<-data.frame(freq=character(),Ear=character(),
+                         pvalue=numeric(),adj.pval=numeric(),
+                         cf.intL=numeric(),cf.intL=numeric(),
+                         cf.lvl=numeric(),est.m=numeric())
+        for (e in ear){
+        for (f in freq){
+                df.ear<-df %>% filter(Ear==e & freq==f)
+                wrst<-wilcox.test(x = df.ear$Audiometer, y=df.ear$uHear,
+                          paired=T,conf.int=T)
+                data<-rbind(data,data.frame(freq=f,
+                              Ear=e,pvalue=wrst$p.value,
+                              adj.pval=p.adjust(wrst$p.value,
+                                                method = "bonferroni",
+                                                n=2),
+                              cf.intL=wrst$conf.int[1],cf.intR=wrst$conf.int[2],
+                              cf.lvl=attributes(wrst$conf.int)$conf.level,
+                            est.m=wrst$estimate[[1]]))
+        }
+        }
+        return(data %>% setNames(c("freq","Ear","pval","adj.pval","cf.intL",
+                                   "cf.intR","cf.lvl","est.m")))
 }
+
+sn <- function(x,digits)
+{
+  if (x==0) return("0")
+  ord <- floor(log(abs(x),10))
+  x <- x / 10^ord
+  if (!missing(digits)) x <- format(x,digits=digits)
+  if (ord==0) return(as.character(x))
+  return(paste(x,"$\\times 10^{",ord,"}$",sep=""))
+}
+
+wrs.result<-wrsTest(tidydata,c("0.5","1","2","4","6"),c("Left","Right")) %>%
+        mutate(`est. M`=round(est.m,3),
+                `$p$`=sn(pval,3),
+               `Adj. $p$`=sn(adj.pval,3)) %>%
+        mutate(`Conf. int.`=paste0("(",round(cf.intL,3),", ",round(cf.intR,3),")"),
+               `Conf. lvl`=cf.lvl) %>%
+        relocate(Ear) %>%
+        select(!c(pval,adj.pval,cf.intL,cf.intR,cf.lvl,est.m))
+
+wrs.result %>%
+        kbl(caption = "Wilcoxon signed rank test results",
+            booktabs=T, digits = 4) %>%
+        collapse_rows(columns = 1, latex_hline = "major", valign = "middle") %>%
+        kable_classic(full_width = F,html_font = "Cambria")
+        
+
+latextable<-kbl(wrs.result, format="latex", align="c", booktabs = T, linesep = "") %>%
+        collapse_rows(columns = 1, latex_hline = "major", valign = "middle") %>%
+        readr::write_lines(.,file = "wrs.tex")
+print(latextable)
 
 ```
 
